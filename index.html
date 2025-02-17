@@ -4,91 +4,107 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agora Video Call</title>
-    <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f4f4f4; }
+        #local-stream, #remote-streams { width: 45%; margin: 10px; }
+        #remote-streams { display: flex; flex-direction: column; }
+        video { width: 100%; height: 100%; border-radius: 8px; }
+    </style>
 </head>
 <body>
-    <h1>Agora Video Call</h1>
-    <button onclick="startCall()">Start Call</button>
-    <button onclick="endCall()">End Call</button>
+
     <div>
-        <video id="localVideo" autoplay playsinline></video>
-        <video id="remoteVideo" autoplay playsinline></video>
+        <div id="local-stream"></div>
+        <div id="remote-streams"></div>
+        <button id="start-call-btn">Start Call</button>
+        <button id="end-call-btn" disabled>End Call</button>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/agora-rtc-sdk@4.23.1"></script>
     <script>
-        const APP_ID = "6abc5b06700a4828a9a1ce296724d0c6";  // তোমার APP ID বসাও
-        const CHANNEL_NAME = getURLParameter('channel');    // URL থেকে চ্যানেল নাম নাও
-        const TOKEN = null;  // Token দিলে এখানে বসাও
-        const UID = getURLParameter('uid') || Math.floor(Math.random() * 10000); // URL থেকে UID নাও বা র্যান্ডম UID নাও
+        // Agora App ID - Replace with your Agora App ID
+        const APP_ID = "6abc5b06700a4828a9a1ce296724d0c6"; 
+        const channelName = new URLSearchParams(window.location.search).get("channel") || "defaultChannel";
+        const uid = new URLSearchParams(window.location.search).get("uid") || Math.floor(Math.random() * 1000000);
 
-        let client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+        let client, localStream, remoteStreams = [];
 
-        // URL থেকে প্যারামিটার গুলি বের করার ফাংশন
-        function getURLParameter(name) {
-            const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get(name);
-        }
+        // Initialize Agora client
+        async function initializeAgora() {
+            client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+            client.on("user-published", handleUserPublished);
+            client.on("user-unpublished", handleUserUnpublished);
 
-        async function startCall() {
             try {
-                // Agora সাইটে যোগদান
-                await client.join(APP_ID, CHANNEL_NAME, TOKEN, UID);
+                await client.init(APP_ID);
+                console.log("AgoraRTC client initialized");
 
-                // মাইক্রোফোন ও ক্যামেরা ট্র্যাক তৈরি
-                const [micTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-                
-                // Local video প্লে করা
-                const localPlayer = document.createElement("video");
-                localPlayer.autoplay = true;
-                localPlayer.muted = true;
-                document.body.appendChild(localPlayer);
-                videoTrack.play(localPlayer);
+                // Join channel
+                await client.join(channelName, uid, null);
+                console.log(`Joined channel: ${channelName} as UID: ${uid}`);
 
-                // Agora client-এ ট্র্যাক পাবলিশ করা
-                await client.publish([micTrack, videoTrack]);
+                // Create and publish local stream
+                localStream = AgoraRTC.createStream({ audio: true, video: true });
+                await localStream.init();
+                document.getElementById("local-stream").appendChild(localStream.play());
 
-                // Remote stream আনার জন্য ইভেন্ট হ্যান্ডলার
-                client.on("stream-added", async function(evt) {
-                    await client.subscribe(evt.stream);
-                });
+                // Publish local stream
+                await client.publish(localStream);
+                console.log("Local stream published");
 
-                // Remote stream প্লে করার জন্য
-                client.on("stream-subscribed", function(evt) {
-                    const remoteStream = evt.stream;
-                    const remotePlayer = document.createElement("video");
-                    remotePlayer.autoplay = true;
-                    document.body.appendChild(remotePlayer);
-                    remoteStream.play(remotePlayer);
-                });
-            } catch (error) {
-                console.error("Error starting the call:", error);
+                document.getElementById("start-call-btn").disabled = true;
+                document.getElementById("end-call-btn").disabled = false;
+            } catch (err) {
+                console.error("Error initializing Agora: ", err);
             }
         }
 
-        function endCall() {
-            // কল শেষ করার জন্য client.leave() ব্যবহার করা
-            client.leave()
-                .then(() => {
-                    console.log("Call Ended");
+        // Handle user published stream
+        function handleUserPublished(user, mediaType) {
+            client.subscribe(user, mediaType).then(() => {
+                const remoteStream = user.stream;
+                remoteStreams.push(remoteStream);
 
-                    // Local track গুলো বন্ধ করা
-                    if (client.localStream) {
-                        client.localStream.stop(); // Local stream বন্ধ
-                    }
-
-                    // Remote track গুলো বন্ধ করা
-                    client.remoteStreams.forEach(stream => {
-                        stream.stop(); // Remote stream বন্ধ
-                    });
-
-                    // ভিডিও প্লেয়ার গুলো রিমুভ করা
-                    document.getElementById("localVideo").remove();
-                    document.getElementById("remoteVideo").remove();
-                })
-                .catch((error) => {
-                    console.error("Error ending the call:", error);
-                });
+                const remoteStreamContainer = document.createElement("div");
+                remoteStreamContainer.id = `remote-stream-${user.uid}`;
+                document.getElementById("remote-streams").appendChild(remoteStreamContainer);
+                remoteStream.play(remoteStreamContainer.id);
+            });
         }
+
+        // Handle user unpublished stream
+        function handleUserUnpublished(user) {
+            const remoteStreamContainer = document.getElementById(`remote-stream-${user.uid}`);
+            if (remoteStreamContainer) {
+                remoteStreamContainer.remove();
+            }
+            const streamIndex = remoteStreams.findIndex(stream => stream.getId() === user.stream.getId());
+            if (streamIndex > -1) {
+                remoteStreams.splice(streamIndex, 1);
+            }
+        }
+
+        // End the call
+        async function endCall() {
+            try {
+                await client.leave();
+                console.log("Left the channel");
+                localStream.stop();
+                localStream.close();
+                remoteStreams.forEach(stream => stream.stop());
+                document.getElementById("start-call-btn").disabled = false;
+                document.getElementById("end-call-btn").disabled = true;
+            } catch (err) {
+                console.error("Error ending call: ", err);
+            }
+        }
+
+        // Start call button click event
+        document.getElementById("start-call-btn").addEventListener("click", initializeAgora);
+
+        // End call button click event
+        document.getElementById("end-call-btn").addEventListener("click", endCall);
     </script>
+
 </body>
 </html>
