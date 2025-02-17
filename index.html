@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agora Video Call</title>
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+</head>
+<body>
+    <h1>Agora Video Call</h1>
+    <button onclick="startCall()">Start Call</button>
+    <button onclick="endCall()">End Call</button>
+    <div>
+        <video id="localVideo" autoplay playsinline></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <script>
+        const APP_ID = "6abc5b06700a4828a9a1ce296724d0c6";  // তোমার APP ID বসাও
+        const CHANNEL_NAME = getURLParameter('channel');    // URL থেকে চ্যানেল নাম নাও
+        const TOKEN = null;  // Token দিলে এখানে বসাও
+        const UID = getURLParameter('uid') || Math.floor(Math.random() * 10000); // URL থেকে UID নাও বা র্যান্ডম UID নাও
+
+        let client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+
+        // URL থেকে প্যারামিটার গুলি বের করার ফাংশন
+        function getURLParameter(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+
+        async function startCall() {
+            try {
+                // Agora সাইটে যোগদান
+                await client.join(APP_ID, CHANNEL_NAME, TOKEN, UID);
+
+                // মাইক্রোফোন ও ক্যামেরা ট্র্যাক তৈরি
+                const [micTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+                
+                // Local video প্লে করা
+                const localPlayer = document.createElement("video");
+                localPlayer.autoplay = true;
+                localPlayer.muted = true;
+                document.body.appendChild(localPlayer);
+                videoTrack.play(localPlayer);
+
+                // Agora client-এ ট্র্যাক পাবলিশ করা
+                await client.publish([micTrack, videoTrack]);
+
+                // Remote stream আনার জন্য ইভেন্ট হ্যান্ডলার
+                client.on("stream-added", async function(evt) {
+                    await client.subscribe(evt.stream);
+                });
+
+                // Remote stream প্লে করার জন্য
+                client.on("stream-subscribed", function(evt) {
+                    const remoteStream = evt.stream;
+                    const remotePlayer = document.createElement("video");
+                    remotePlayer.autoplay = true;
+                    document.body.appendChild(remotePlayer);
+                    remoteStream.play(remotePlayer);
+                });
+            } catch (error) {
+                console.error("Error starting the call:", error);
+            }
+        }
+
+        function endCall() {
+            // কল শেষ করার জন্য client.leave() ব্যবহার করা
+            client.leave()
+                .then(() => {
+                    console.log("Call Ended");
+
+                    // Local track গুলো বন্ধ করা
+                    if (client.localStream) {
+                        client.localStream.stop(); // Local stream বন্ধ
+                    }
+
+                    // Remote track গুলো বন্ধ করা
+                    client.remoteStreams.forEach(stream => {
+                        stream.stop(); // Remote stream বন্ধ
+                    });
+
+                    // ভিডিও প্লেয়ার গুলো রিমুভ করা
+                    document.getElementById("localVideo").remove();
+                    document.getElementById("remoteVideo").remove();
+                })
+                .catch((error) => {
+                    console.error("Error ending the call:", error);
+                });
+        }
+    </script>
+</body>
+</html>
